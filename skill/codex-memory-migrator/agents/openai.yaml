@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Memory Migrator"
+  short_description: "Migrate Codex history across machines"
+  default_prompt: "Use $codex-memory-migrator to export a Codex home snapshot and rewrite absolute paths for another machine."
