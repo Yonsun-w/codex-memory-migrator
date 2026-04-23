@@ -57,6 +57,17 @@ class CodexMemoryMigratorTests(unittest.TestCase):
             self.assertTrue(target.is_symlink())
             self.assertEqual(target.resolve(), MODULE.SKILL_DIR.resolve())
 
+    def test_install_commands_creates_default_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bin_dir = Path(temp_dir) / "bin"
+
+            installed = MODULE.install_commands(bin_dir, force=False, command_names=MODULE.DEFAULT_COMMAND_NAMES)
+
+            self.assertEqual([path.name for path in installed], list(MODULE.DEFAULT_COMMAND_NAMES))
+            for path in installed:
+                self.assertTrue(path.exists())
+                self.assertIn(str(MODULE.SCRIPT_PATH), path.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

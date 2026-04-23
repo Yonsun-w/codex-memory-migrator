@@ -1,18 +1,12 @@
 # Codex Memory Migrator
 
-Open-source tooling for moving a local Codex home between machines without losing conversation history, session metadata, and path-linked memories.
+[中文说明](./README.zh-CN.md) | English
 
-The repository contains:
+> Move Codex history between machines without losing sessions, memories, or path-linked context. ⚡
 
-- a reusable Codex skill in `skill/codex-memory-migrator`
-- a Python CLI that scans, exports, and rewrites a copied Codex home snapshot
-- minimal docs for safe migration workflows
+## Why This Repo Exists
 
-By default the exporter skips volatile cache directories such as `.tmp/` and `tmp/`. Those folders can be large and are not required for preserving conversation history.
-
-## Why this exists
-
-Codex stores more than plain chat text. A local `~/.codex` usually includes:
+Codex local state is not just one chat log. A typical `~/.codex` contains:
 
 - `history.jsonl`
 - `sessions/**/*.jsonl`
@@ -20,68 +14,126 @@ Codex stores more than plain chat text. A local `~/.codex` usually includes:
 - `state_*.sqlite`
 - `logs_*.sqlite`
 
-Those files often contain absolute paths such as `/Users/alice/project-x`. Copying only one file is not enough, and moving to a different machine or username may require bulk path rewrites inside text files and SQLite text columns.
+When you move to a new Mac, rename your user account, or relocate projects, those files can still point at old absolute paths like `/Users/alice/project-x`. This repo fixes that at the source instead of relying on manual edits.
 
-## What the CLI does
+## Highlights
 
-- `scan`: inspect a Codex home and summarize where absolute paths appear
-- `export`: copy a Codex home into a transportable snapshot and write a manifest
-- `plan`: inspect an export manifest and suggest the rewrite command for the target machine
-- `rewrite`: rewrite copied paths inside text files and SQLite databases
-- `install-skill`: install the bundled skill into `~/.codex/skills`
+- ⚡ Pure Node CLI with real npm bins
+- 🧠 Codex skill included for keyword-based triggering
+- 🔍 `scan` and `plan` help you see what will break before rewrite
+- 🛠 `rewrite` updates text files and SQLite text columns
+- 📦 `install` sets up both the skill and command aliases locally
+- 🌍 Bilingual docs for GitHub open source use
 
-## Recommended workflow
+## Install
 
-On the source machine:
+### 1. Run from the repo
 
 ```bash
-python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py export \
+node ./bin/codex-memory-migrator.js --help
+```
+
+### 2. Global install for real commands
+
+```bash
+npm install -g .
+```
+
+This gives you commands like:
+
+```bash
+codex-memory-migrator
+fix-codex-paths
+migrate-codex-memory
+```
+
+### 3. Local Codex skill + aliases
+
+```bash
+codex-memory-migrator install
+```
+
+By default this installs:
+
+- the skill into `~/.codex/skills`
+- local command wrappers into `~/.local/bin`
+
+## Fast Workflow
+
+### Export on the old machine
+
+```bash
+codex-memory-migrator export \
   --codex-home ~/.codex \
   --output-dir ~/codex-memory-export
 ```
 
-Move `~/codex-memory-export` to the target machine, then run:
+### Inspect on the new machine
 
 ```bash
-python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py plan \
+fix-codex-paths plan \
   --manifest ~/codex-memory-export/manifest.json
+```
 
-python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py rewrite \
+### Rewrite broken paths
+
+```bash
+codex-memory-migrator rewrite \
   --root ~/codex-memory-export/codex-home \
   --manifest ~/codex-memory-export/manifest.json
 ```
 
-Finally copy the rewritten snapshot into the target Codex home:
+### Restore to the target Codex home
 
 ```bash
 rsync -a ~/codex-memory-export/codex-home/ ~/.codex/
 ```
 
-## Install the skill
+## Command Surface
 
-Install the skill into your local Codex skills directory:
+- `install`
+  Installs the bundled skill and local command aliases.
+- `scan`
+  Scans a Codex home and summarizes absolute path usage.
+- `export`
+  Copies `~/.codex` into a portable snapshot and writes `manifest.json`.
+- `plan`
+  Reads `manifest.json` and suggests target-machine rewrites.
+- `rewrite`
+  Rewrites copied paths in text files and SQLite text columns.
+- `install-skill`
+  Installs the Codex skill only.
+- `install-commands`
+  Installs local wrapper commands only.
 
-```bash
-python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py install-skill
-```
+## Codex Trigger Keywords
 
-Use `--copy` if you do not want a symlink.
-
-Then invoke it in Codex with prompts such as:
+If you prefer natural-language triggering inside Codex, the bundled skill is tuned for phrases like:
 
 ```text
-Use $codex-memory-migrator to export my Codex data and prepare it for another machine.
-Use $codex-memory-migrator to fix old /Users/... paths after I moved to a new Mac.
+修复 Codex 旧路径
+迁移 Codex 到新 Mac
+恢复 ~/.codex 历史
+fix old /Users paths
+move Codex to a new Mac
+copy ~/.codex between users
 ```
 
-## Safety notes
+## Open Source Notes
 
-- Close Codex before exporting if you want the cleanest SQLite snapshot.
-- Run `rewrite` on a copied snapshot, not on your live `~/.codex`.
-- Prefer preserving the old directory layout when possible. Rewriting is best-effort.
-- `rewrite --manifest ...` can infer a home-directory mapping automatically when the manifest shows the old machine's user home.
-- Export skips `.tmp/` and `tmp/` by default because they are volatile caches, not durable chat history.
-- The SQLite rewrite only updates text columns. It does not mutate binary blobs.
+- 🧪 Requires Node `>=22`
+- 🗃 Uses the built-in `node:sqlite` module for SQLite rewriting
+- 📁 Skips volatile cache folders like `.tmp/`, `tmp/`, `node_modules/`, and `.git`
+- 🔒 Rewrites copied snapshots, not your live source directory
+
+## Development
+
+```bash
+npm test
+python3 -m unittest discover -s tests -v
+```
+
+The Python script is still kept in the repo for compatibility with the existing skill workflow, but the public-facing CLI is now the Node version.
 
 ## License
 

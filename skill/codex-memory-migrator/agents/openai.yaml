@@ -1,4 +1,4 @@
 interface:
   display_name: "Codex Memory Migrator"
-  short_description: "Move Codex history and fix broken old paths"
-  default_prompt: "Use $codex-memory-migrator to install the skill locally, export a Codex home snapshot, and rewrite old absolute paths for a new machine or user account."
+  short_description: "迁移 Codex 历史并修复旧路径"
+  default_prompt: "修复 Codex 旧路径，或迁移 Codex 到新 Mac；必要时安装本地命令别名并改写旧的 /Users/... 路径。"

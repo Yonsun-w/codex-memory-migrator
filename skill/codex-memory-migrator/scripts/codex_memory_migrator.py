@@ -31,6 +31,8 @@ TEXT_SUFFIXES = {
 SQLITE_SUFFIXES = {".sqlite", ".db", ".sqlite3"}
 DEFAULT_EXCLUDED_DIRS = {".tmp", "tmp", "__pycache__"}
 SKILL_DIR = Path(__file__).resolve().parent.parent
+SCRIPT_PATH = Path(__file__).resolve()
+DEFAULT_COMMAND_NAMES = ("codex-memory-migrator", "fix-codex-paths", "migrate-codex-memory")
 
 
 @dataclass
@@ -312,6 +314,52 @@ def install_skill(skills_dir: Path, force: bool, copy_mode: bool) -> Path:
     return target
 
 
+def command_wrapper_text() -> str:
+    return (
+        "#!/bin/sh\n"
+        f'exec python3 "{SCRIPT_PATH}" "$@"\n'
+    )
+
+
+def install_commands(bin_dir: Path, force: bool, command_names: Iterable[str]) -> list[Path]:
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    installed: list[Path] = []
+    wrapper_text = command_wrapper_text()
+
+    for name in command_names:
+        target = bin_dir / name
+        if target.exists() or target.is_symlink():
+            if target.is_file():
+                try:
+                    if target.read_text(encoding="utf-8") == wrapper_text:
+                        installed.append(target)
+                        continue
+                except OSError:
+                    pass
+            if not force:
+                raise SystemExit(f"Command target '{target}' already exists. Use --force to replace it.")
+            remove_existing_target(target)
+
+        target.write_text(wrapper_text, encoding="utf-8")
+        target.chmod(0o755)
+        installed.append(target)
+
+    return installed
+
+
+def path_contains(directory: Path) -> bool:
+    resolved_dir = directory.resolve()
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry:
+            continue
+        try:
+            if Path(entry).expanduser().resolve() == resolved_dir:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def rewrite_text_files(root: Path, mappings: list[tuple[str, str]], dry_run: bool) -> RewriteStats:
     stats = RewriteStats()
     for path in iter_files(root):
@@ -452,6 +500,53 @@ def command_install_skill(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_install_commands(args: argparse.Namespace) -> int:
+    bin_dir = expand_path(args.bin_dir)
+    command_names = args.command_name or list(DEFAULT_COMMAND_NAMES)
+    installed = install_commands(bin_dir, args.force, command_names)
+    print(
+        json.dumps(
+            {
+                "bin_dir": str(bin_dir),
+                "commands": [str(path) for path in installed],
+                "bin_dir_on_path": path_contains(bin_dir),
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+    return 0
+
+
+def command_install(args: argparse.Namespace) -> int:
+    if args.skill_only and args.commands_only:
+        raise SystemExit("--skill-only and --commands-only cannot be used together.")
+
+    result: dict[str, object] = {}
+
+    if not args.commands_only:
+        skills_dir = expand_path(args.skills_dir)
+        skill_target = install_skill(skills_dir, args.force, args.copy)
+        result["skill"] = {
+            "installed_to": str(skill_target),
+            "source": str(SKILL_DIR),
+            "mode": "copy" if args.copy else "symlink",
+        }
+
+    if not args.skill_only:
+        bin_dir = expand_path(args.bin_dir)
+        command_names = args.command_name or list(DEFAULT_COMMAND_NAMES)
+        installed = install_commands(bin_dir, args.force, command_names)
+        result["commands"] = {
+            "bin_dir": str(bin_dir),
+            "installed": [str(path) for path in installed],
+            "bin_dir_on_path": path_contains(bin_dir),
+        }
+
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Export, plan, rewrite, and install a Codex migration skill for moving state across machines."
@@ -469,6 +564,31 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("--top", type=int, default=20, help="Number of top path prefixes to store in the manifest.")
     export_parser.add_argument("--force", action="store_true", help="Overwrite an existing snapshot directory.")
     export_parser.set_defaults(func=command_export)
+
+    install_parser = subparsers.add_parser(
+        "install", help="Install the skill and local command aliases in one step."
+    )
+    install_parser.add_argument(
+        "--skills-dir",
+        default="~/.codex/skills",
+        help="Destination Codex skills directory. Defaults to ~/.codex/skills.",
+    )
+    install_parser.add_argument(
+        "--bin-dir",
+        default="~/.local/bin",
+        help="Directory for local command aliases. Defaults to ~/.local/bin.",
+    )
+    install_parser.add_argument(
+        "--command-name",
+        action="append",
+        default=[],
+        help="Command name to install. Can be repeated. Defaults to several aliases.",
+    )
+    install_parser.add_argument("--copy", action="store_true", help="Copy the skill instead of creating a symlink.")
+    install_parser.add_argument("--force", action="store_true", help="Replace existing install targets.")
+    install_parser.add_argument("--skill-only", action="store_true", help="Install only the skill.")
+    install_parser.add_argument("--commands-only", action="store_true", help="Install only command aliases.")
+    install_parser.set_defaults(func=command_install)
 
     plan_parser = subparsers.add_parser(
         "plan", help="Read an export manifest and suggest rewrite mappings for the current machine."
@@ -512,6 +632,23 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--copy", action="store_true", help="Copy the skill instead of creating a symlink.")
     install_parser.add_argument("--force", action="store_true", help="Replace an existing installation target.")
     install_parser.set_defaults(func=command_install_skill)
+
+    commands_parser = subparsers.add_parser(
+        "install-commands", help="Install local command aliases that run this script directly."
+    )
+    commands_parser.add_argument(
+        "--bin-dir",
+        default="~/.local/bin",
+        help="Directory for local command aliases. Defaults to ~/.local/bin.",
+    )
+    commands_parser.add_argument(
+        "--command-name",
+        action="append",
+        default=[],
+        help="Command name to install. Can be repeated. Defaults to several aliases.",
+    )
+    commands_parser.add_argument("--force", action="store_true", help="Replace an existing command target.")
+    commands_parser.set_defaults(func=command_install_commands)
 
     return parser
 

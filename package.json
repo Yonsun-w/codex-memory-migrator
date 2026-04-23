@@ -1,0 +1,45 @@
+{
+  "name": "codex-memory-migrator",
+  "version": "0.2.0",
+  "description": "Migrate local Codex history across machines and rewrite broken absolute paths.",
+  "type": "module",
+  "bin": {
+    "codex-memory-migrator": "./bin/codex-memory-migrator.js",
+    "fix-codex-paths": "./bin/codex-memory-migrator.js",
+    "migrate-codex-memory": "./bin/codex-memory-migrator.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "skill",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "keywords": [
+    "codex",
+    "migration",
+    "sqlite",
+    "path-rewrite",
+    "macos",
+    "developer-tools"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yonsun-w/codex-memory-migrator.git"
+  },
+  "homepage": "https://github.com/Yonsun-w/codex-memory-migrator#readme",
+  "bugs": {
+    "url": "https://github.com/Yonsun-w/codex-memory-migrator/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

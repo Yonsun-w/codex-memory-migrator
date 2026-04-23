@@ -1,6 +1,6 @@
 ---
 name: codex-memory-migrator
-description: Use this skill when moving Codex to a new machine, restoring local conversation history after reinstall, copying ~/.codex between users, or fixing broken session and memory paths that still point at old absolute directories.
+description: Trigger on prompts like "迁移 Codex 到新 Mac", "修复 Codex 旧路径", "恢复 ~/.codex 历史", "fix old /Users paths", "move Codex to a new Mac", or "copy ~/.codex between users".
 ---
 
 # Codex Memory Migrator
@@ -11,16 +11,18 @@ Read [migration-workflow.md](./references/migration-workflow.md) when you need t
 
 ## Quick Start
 
-Install the skill locally:
+Install the skill and local command aliases:
 
 ```bash
-python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py install-skill
+codex-memory-migrator install
 ```
+
+That installs the skill plus command aliases such as `codex-memory-migrator`, `fix-codex-paths`, and `migrate-codex-memory`.
 
 Export the current Codex home:
 
 ```bash
-python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py export \
+codex-memory-migrator export \
   --codex-home ~/.codex \
   --output-dir ~/codex-memory-export
 ```
@@ -28,14 +30,14 @@ python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py export \
 On the target machine, inspect the export and let the tool suggest the home-directory rewrite:
 
 ```bash
-python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py plan \
+fix-codex-paths plan \
   --manifest ~/codex-memory-export/manifest.json
 ```
 
 Then rewrite the copied snapshot. If the manifest has enough information, you do not need to pass `--map` manually:
 
 ```bash
-python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py rewrite \
+codex-memory-migrator rewrite \
   --root ~/codex-memory-export/codex-home \
   --manifest ~/codex-memory-export/manifest.json
 ```
@@ -53,12 +55,13 @@ Then copy the rewritten snapshot into `~/.codex`.
 ## Workflow
 
 1. If the user only wants the skill available locally, run `install-skill`.
-2. On the source machine, run `scan` or `export` to understand path usage and snapshot the full Codex home.
-3. Transfer the export folder to the new machine.
-4. Prefer `plan --manifest ...` to inspect the export and suggest mappings before rewriting.
-5. Prefer `rewrite --manifest ...` if the old and new machines mainly differ by home directory or username.
-6. Fall back to explicit `--map OLD=NEW` values when projects moved to a different workspace root.
-7. Copy the rewritten `codex-home/` contents into the target `~/.codex`.
+2. If the user wants command-style usage, run `install` and use `fix-codex-paths ...` or `codex-memory-migrator ...`.
+3. On the source machine, run `scan` or `export` to understand path usage and snapshot the full Codex home.
+4. Transfer the export folder to the new machine.
+5. Prefer `plan --manifest ...` to inspect the export and suggest mappings before rewriting.
+6. Prefer `rewrite --manifest ...` if the old and new machines mainly differ by home directory or username.
+7. Fall back to explicit `--map OLD=NEW` values when projects moved to a different workspace root.
+8. Copy the rewritten `codex-home/` contents into the target `~/.codex`.
 
 ## Notes
 
@@ -70,6 +73,8 @@ Then copy the rewritten snapshot into `~/.codex`.
 - The script rewrites text files and SQLite text columns. It does not rewrite binary blobs.
 - `rewrite --manifest ...` automatically infers a home-directory mapping such as `/Users/oldname -> /Users/newname`.
 - `install-skill` creates a symlink in `~/.codex/skills` by default, and can use `--copy` if symlinks are not desired.
+- `install` also creates local command aliases so you can trigger the workflow with short command names instead of `$skill-name`.
+- The public-facing CLI is the Node command. The bundled Python script remains in the repo for compatibility.
 
 ## Script
 
