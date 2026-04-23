@@ -4,9 +4,9 @@
   "description": "Migrate local Codex history across machines and rewrite broken absolute paths.",
   "type": "module",
   "bin": {
-    "codex-memory-migrator": "./bin/codex-memory-migrator.js",
-    "fix-codex-paths": "./bin/codex-memory-migrator.js",
-    "migrate-codex-memory": "./bin/codex-memory-migrator.js"
+    "codex-memory-migrator": "bin/codex-memory-migrator.js",
+    "fix-codex-paths": "bin/codex-memory-migrator.js",
+    "migrate-codex-memory": "bin/codex-memory-migrator.js"
   },
   "files": [
     "bin",
