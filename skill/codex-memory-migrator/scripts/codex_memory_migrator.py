@@ -30,6 +30,7 @@ TEXT_SUFFIXES = {
 }
 SQLITE_SUFFIXES = {".sqlite", ".db", ".sqlite3"}
 DEFAULT_EXCLUDED_DIRS = {".tmp", "tmp", "__pycache__"}
+SKILL_DIR = Path(__file__).resolve().parent.parent
 
 
 @dataclass
@@ -83,6 +84,10 @@ def parse_mapping(raw: str) -> tuple[str, str]:
     return old, new
 
 
+def posix_path(value: str | os.PathLike[str]) -> str:
+    return PurePosixPath(os.fspath(value)).as_posix()
+
+
 def summarize_prefix(raw_path: str) -> str:
     raw_path = raw_path.rstrip("/")
     parts = list(PurePosixPath(raw_path).parts)
@@ -91,6 +96,13 @@ def summarize_prefix(raw_path: str) -> str:
     if len(parts) >= 2:
         return str(PurePosixPath(*parts[:2]))
     return raw_path
+
+
+def home_prefix(path_text: str) -> str | None:
+    parts = list(PurePosixPath(path_text).parts)
+    if len(parts) >= 3 and parts[1] in {"Users", "home"}:
+        return str(PurePosixPath(*parts[:3]))
+    return None
 
 
 def should_skip_dir(path: Path, excluded_dirs: set[str]) -> bool:
@@ -150,6 +162,62 @@ def scan_summary(root: Path, top_n: int) -> dict:
     }
 
 
+def load_manifest(manifest_path: Path) -> dict:
+    try:
+        return json.loads(manifest_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise SystemExit(f"Manifest '{manifest_path}' does not exist.") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Manifest '{manifest_path}' is not valid JSON: {exc}") from exc
+
+
+def infer_mappings_from_manifest(manifest: dict, target_home: Path) -> list[tuple[str, str]]:
+    suggestions: list[tuple[str, str]] = []
+    target_home_text = posix_path(target_home)
+
+    source_codex_home = manifest.get("source_codex_home")
+    if isinstance(source_codex_home, str):
+        source_home = home_prefix(posix_path(Path(source_codex_home).parent))
+        if source_home and source_home != target_home_text:
+            suggestions.append((source_home, target_home_text))
+
+    scan = manifest.get("scan") or {}
+    for item in scan.get("top_path_prefixes") or []:
+        if not isinstance(item, list) or not item:
+            continue
+        prefix = item[0]
+        if not isinstance(prefix, str):
+            continue
+        source_home = home_prefix(prefix)
+        if source_home and source_home != target_home_text:
+            suggestions.append((source_home, target_home_text))
+
+    unique: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for old, new in suggestions:
+        pair = (old.rstrip("/"), new.rstrip("/"))
+        if pair not in seen:
+            seen.add(pair)
+            unique.append(pair)
+    return unique
+
+
+def resolve_mappings(raw_mappings: list[str], manifest_path: str | None, target_home: str | None) -> list[tuple[str, str]]:
+    mappings = [parse_mapping(item) for item in raw_mappings]
+    if mappings:
+        return sorted(mappings, key=lambda item: len(item[0]), reverse=True)
+
+    if manifest_path:
+        manifest = load_manifest(expand_path(manifest_path))
+        inferred = infer_mappings_from_manifest(manifest, expand_path(target_home or "~"))
+        if inferred:
+            return sorted(inferred, key=lambda item: len(item[0]), reverse=True)
+
+    raise SystemExit(
+        "No mappings available. Pass --map OLD=NEW or provide --manifest so the tool can infer a home-directory rewrite."
+    )
+
+
 def ignore_export_dirs(_dir: str, names: list[str]) -> list[str]:
     return [name for name in names if name in DEFAULT_EXCLUDED_DIRS]
 
@@ -189,6 +257,59 @@ def replace_text_content(content: str, mappings: list[tuple[str, str]]) -> tuple
             updated = updated.replace(old, new)
             replacements += count
     return updated, replacements
+
+
+def plan_summary(manifest_path: Path, target_home: Path) -> dict:
+    manifest = load_manifest(manifest_path)
+    inferred = infer_mappings_from_manifest(manifest, target_home)
+    snapshot_dir = manifest.get("snapshot_dir")
+    next_step = "manual-review"
+    if snapshot_dir and inferred:
+        next_step = "rewrite-exported-snapshot"
+    elif snapshot_dir:
+        next_step = "rewrite-with-manual-mapping"
+
+    return {
+        "generated_at": utc_now(),
+        "manifest": str(manifest_path),
+        "target_home": str(target_home),
+        "source_codex_home": manifest.get("source_codex_home"),
+        "snapshot_dir": snapshot_dir,
+        "suggested_mappings": [{"old": old, "new": new} for old, new in inferred],
+        "top_path_prefixes": (manifest.get("scan") or {}).get("top_path_prefixes", []),
+        "recommended_next_step": next_step,
+        "rewrite_example": (
+            f"python3 {SKILL_DIR / 'scripts' / 'codex_memory_migrator.py'} rewrite "
+            f"--root {snapshot_dir} --manifest {manifest_path}"
+            if snapshot_dir
+            else None
+        ),
+    }
+
+
+def remove_existing_target(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def install_skill(skills_dir: Path, force: bool, copy_mode: bool) -> Path:
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    target = skills_dir / SKILL_DIR.name
+
+    if target.exists() or target.is_symlink():
+        if target.is_symlink() and target.resolve() == SKILL_DIR.resolve():
+            return target
+        if not force:
+            raise SystemExit(f"Skill target '{target}' already exists. Use --force to replace it.")
+        remove_existing_target(target)
+
+    if copy_mode:
+        shutil.copytree(SKILL_DIR, target, symlinks=True)
+    else:
+        target.symlink_to(SKILL_DIR, target_is_directory=True)
+    return target
 
 
 def rewrite_text_files(root: Path, mappings: list[tuple[str, str]], dry_run: bool) -> RewriteStats:
@@ -292,11 +413,7 @@ def command_export(args: argparse.Namespace) -> int:
 
 def command_rewrite(args: argparse.Namespace) -> int:
     root = expand_path(args.root)
-    mappings = [parse_mapping(item) for item in args.map]
-    if not mappings:
-        raise SystemExit("At least one --map OLD=NEW entry is required.")
-
-    ordered_mappings = sorted(mappings, key=lambda item: len(item[0]), reverse=True)
+    ordered_mappings = resolve_mappings(args.map, args.manifest, args.target_home)
     text_stats = rewrite_text_files(root, ordered_mappings, args.dry_run)
     sqlite_stats = rewrite_sqlite_files(root, ordered_mappings, args.dry_run)
     summary = {
@@ -312,9 +429,32 @@ def command_rewrite(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_plan(args: argparse.Namespace) -> int:
+    summary = plan_summary(expand_path(args.manifest), expand_path(args.target_home))
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    return 0
+
+
+def command_install_skill(args: argparse.Namespace) -> int:
+    skills_dir = expand_path(args.skills_dir)
+    target = install_skill(skills_dir, args.force, args.copy)
+    print(
+        json.dumps(
+            {
+                "installed_to": str(target),
+                "source": str(SKILL_DIR),
+                "mode": "copy" if args.copy else "symlink",
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Export and rewrite a Codex home snapshot for migration across machines."
+        description="Export, plan, rewrite, and install a Codex migration skill for moving state across machines."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -330,6 +470,17 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("--force", action="store_true", help="Overwrite an existing snapshot directory.")
     export_parser.set_defaults(func=command_export)
 
+    plan_parser = subparsers.add_parser(
+        "plan", help="Read an export manifest and suggest rewrite mappings for the current machine."
+    )
+    plan_parser.add_argument("--manifest", required=True, help="Path to the export manifest.json.")
+    plan_parser.add_argument(
+        "--target-home",
+        default=str(Path.home()),
+        help="Home directory on the target machine. Defaults to the current user's home.",
+    )
+    plan_parser.set_defaults(func=command_plan)
+
     rewrite_parser = subparsers.add_parser(
         "rewrite", help="Rewrite copied absolute paths inside text files and SQLite databases."
     )
@@ -341,8 +492,26 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="OLD=NEW",
         help="Path mapping. Can be repeated. More specific mappings win.",
     )
+    rewrite_parser.add_argument("--manifest", help="Optional export manifest.json used to infer a home-directory mapping.")
+    rewrite_parser.add_argument(
+        "--target-home",
+        default=str(Path.home()),
+        help="Target home directory used with --manifest. Defaults to the current user's home.",
+    )
     rewrite_parser.add_argument("--dry-run", action="store_true", help="Show what would change without writing.")
     rewrite_parser.set_defaults(func=command_rewrite)
+
+    install_parser = subparsers.add_parser(
+        "install-skill", help="Install this skill into a local Codex skills directory."
+    )
+    install_parser.add_argument(
+        "--skills-dir",
+        default="~/.codex/skills",
+        help="Destination Codex skills directory. Defaults to ~/.codex/skills.",
+    )
+    install_parser.add_argument("--copy", action="store_true", help="Copy the skill instead of creating a symlink.")
+    install_parser.add_argument("--force", action="store_true", help="Replace an existing installation target.")
+    install_parser.set_defaults(func=command_install_skill)
 
     return parser
 

@@ -26,16 +26,15 @@ Those files often contain absolute paths such as `/Users/alice/project-x`. Copyi
 
 - `scan`: inspect a Codex home and summarize where absolute paths appear
 - `export`: copy a Codex home into a transportable snapshot and write a manifest
+- `plan`: inspect an export manifest and suggest the rewrite command for the target machine
 - `rewrite`: rewrite copied paths inside text files and SQLite databases
+- `install-skill`: install the bundled skill into `~/.codex/skills`
 
 ## Recommended workflow
 
 On the source machine:
 
 ```bash
-python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py scan \
-  --codex-home ~/.codex
-
 python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py export \
   --codex-home ~/.codex \
   --output-dir ~/codex-memory-export
@@ -44,9 +43,12 @@ python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py export \
 Move `~/codex-memory-export` to the target machine, then run:
 
 ```bash
+python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py plan \
+  --manifest ~/codex-memory-export/manifest.json
+
 python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py rewrite \
   --root ~/codex-memory-export/codex-home \
-  --map /Users/oldname=/Users/newname
+  --manifest ~/codex-memory-export/manifest.json
 ```
 
 Finally copy the rewritten snapshot into the target Codex home:
@@ -57,18 +59,19 @@ rsync -a ~/codex-memory-export/codex-home/ ~/.codex/
 
 ## Install the skill
 
-Copy or symlink the skill directory into your Codex skills directory:
+Install the skill into your local Codex skills directory:
 
 ```bash
-mkdir -p ~/.codex/skills
-ln -s /absolute/path/to/codex-memory-migrator/skill/codex-memory-migrator \
-  ~/.codex/skills/codex-memory-migrator
+python3 skill/codex-memory-migrator/scripts/codex_memory_migrator.py install-skill
 ```
 
-Then invoke it in Codex with:
+Use `--copy` if you do not want a symlink.
+
+Then invoke it in Codex with prompts such as:
 
 ```text
 Use $codex-memory-migrator to export my Codex data and prepare it for another machine.
+Use $codex-memory-migrator to fix old /Users/... paths after I moved to a new Mac.
 ```
 
 ## Safety notes
@@ -76,6 +79,7 @@ Use $codex-memory-migrator to export my Codex data and prepare it for another ma
 - Close Codex before exporting if you want the cleanest SQLite snapshot.
 - Run `rewrite` on a copied snapshot, not on your live `~/.codex`.
 - Prefer preserving the old directory layout when possible. Rewriting is best-effort.
+- `rewrite --manifest ...` can infer a home-directory mapping automatically when the manifest shows the old machine's user home.
 - Export skips `.tmp/` and `tmp/` by default because they are volatile caches, not durable chat history.
 - The SQLite rewrite only updates text columns. It does not mutate binary blobs.
 
